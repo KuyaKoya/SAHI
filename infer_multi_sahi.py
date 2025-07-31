@@ -65,6 +65,24 @@ TILING_STRATEGIES = [
         "overlap_width_ratio": 0.25,
         "weight": 1.4,
     },
+    {
+        "name": "clahe_enhanced",
+        "slice_height": 768,
+        "slice_width": 768,
+        "overlap_height_ratio": 0.25,
+        "overlap_width_ratio": 0.25,
+        "apply_clahe": True,
+        "weight": 1.4,
+    },
+    {
+        "name": "grayscale_clahe",
+        "slice_height": 768,
+        "slice_width": 768,
+        "overlap_height_ratio": 0.25,
+        "overlap_width_ratio": 0.25,
+        "apply_grayscale_clahe": True,
+        "weight": 1.5,
+    },
 ]
 
 
@@ -197,27 +215,45 @@ def weighted_box_fusion(detections_list, iou_threshold=0.5, skip_box_threshold=0
 def run_single_strategy(image_path, detection_model, strategy, original_image_shape):
     """Run inference with a single tiling strategy"""
     original_height, original_width = original_image_shape[:2]
+    original_image = cv2.imread(image_path)
+    if original_image is None:
+        raise ValueError(f"Unable to read image: {image_path}")
 
-    # Handle resizing if specified
-    if "resize_target" in strategy:
+    # CLAHE (LAB L-channel)
+    if strategy.get("apply_clahe", False):
+        print(f"  └─ {strategy['name']}: applying CLAHE on LAB L-channel")
+        lab = cv2.cvtColor(original_image, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        merged = cv2.merge((cl, a, b))
+        processed_image = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+        inference_image_path = image_path  # Not used; we pass image directly
+        scale_x = 1.0
+        scale_y = 1.0
+
+    # Grayscale + CLAHE
+    elif strategy.get("apply_grayscale_clahe", False):
+        print(f"  └─ {strategy['name']}: applying CLAHE on grayscale")
+        gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        processed_image = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+        inference_image_path = image_path
+        scale_x = 1.0
+        scale_y = 1.0
+
+    # Resize strategy
+    elif "resize_target" in strategy:
         target_width, target_height = strategy["resize_target"]
-
-        # Create temporary resized image
-        original_image = cv2.imread(image_path)
-        resized_image = cv2.resize(original_image, (target_width, target_height))
-
-        # Save temporary resized image
+        processed_image = cv2.resize(original_image, (target_width, target_height))
         temp_dir = os.path.join(os.path.dirname(image_path), "temp_resized")
         os.makedirs(temp_dir, exist_ok=True)
         temp_image_name = f"temp_resized_{os.path.basename(image_path)}"
         temp_image_path = os.path.join(temp_dir, temp_image_name)
-        cv2.imwrite(temp_image_path, resized_image)
+        cv2.imwrite(temp_image_path, processed_image)
 
-        # Use resized dimensions for tiling calculations
-        height, width = target_height, target_width
         inference_image_path = temp_image_path
-
-        # Calculate scale factors for coordinate transformation
         scale_x = original_width / target_width
         scale_y = original_height / target_height
 
@@ -225,14 +261,14 @@ def run_single_strategy(image_path, detection_model, strategy, original_image_sh
             f"  └─ {strategy['name']}: resized ({original_width}x{original_height}) → ({target_width}x{target_height})"
         )
     else:
-        # Use original image
-        height, width = original_height, original_width
+        processed_image = original_image
         inference_image_path = image_path
         scale_x = 1.0
         scale_y = 1.0
 
+    height, width = processed_image.shape[:2]
+
     if "slice_scale" in strategy:
-        # Dynamic strategy
         slice_height = clamp(
             int(height * strategy["slice_scale"]),
             strategy["min_slice"],
@@ -246,7 +282,6 @@ def run_single_strategy(image_path, detection_model, strategy, original_image_sh
         overlap_height_ratio = clamp(512 / slice_height, 0.10, 0.30)
         overlap_width_ratio = clamp(512 / slice_width, 0.10, 0.30)
     else:
-        # Fixed strategy
         slice_height = strategy["slice_height"]
         slice_width = strategy["slice_width"]
         overlap_height_ratio = strategy["overlap_height_ratio"]
@@ -258,7 +293,7 @@ def run_single_strategy(image_path, detection_model, strategy, original_image_sh
     )
 
     result = get_sliced_prediction(
-        inference_image_path,
+        processed_image,
         detection_model,
         slice_height=slice_height,
         slice_width=slice_width,
@@ -267,7 +302,7 @@ def run_single_strategy(image_path, detection_model, strategy, original_image_sh
         perform_standard_pred=True,
     )
 
-    # Extract detections in standardized format
+    # Extract detections
     boxes = []
     scores = []
     labels = []
@@ -275,33 +310,29 @@ def run_single_strategy(image_path, detection_model, strategy, original_image_sh
     if hasattr(result, "object_prediction_list"):
         for pred in result.object_prediction_list:
             bbox = pred.bbox
-
-            # Transform coordinates back to original image scale
             original_minx = bbox.minx * scale_x
             original_miny = bbox.miny * scale_y
             original_maxx = bbox.maxx * scale_x
             original_maxy = bbox.maxy * scale_y
-
             boxes.append([original_minx, original_miny, original_maxx, original_maxy])
             scores.append(pred.score.value)
             labels.append(pred.category.id)
 
-    # Clean up temporary resized image if created
+    # Cleanup temp resized image
     if "resize_target" in strategy:
         try:
             os.remove(temp_image_path)
-            # Remove temp directory if empty
             if not os.listdir(temp_dir):
                 os.rmdir(temp_dir)
         except:
-            pass  # Ignore cleanup errors
+            pass
 
     return {
         "boxes": boxes,
         "scores": scores,
         "labels": labels,
         "weight": strategy["weight"],
-        "result_object": result,  # Keep original result for visualization
+        "result_object": result,
     }
 
 
