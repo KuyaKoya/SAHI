@@ -11,7 +11,7 @@ import json
 
 # Configuration
 IMAGE_DIR = "test_images"
-MODEL_PATH = "exports/floorplans_yolov11/weights/best.pt"
+MODEL_PATH = "model/model_v52.pt"
 OUTPUT_DIR = "results/sahi_ensemble_outputs"
 
 # Multiple tiling strategies
@@ -46,6 +46,24 @@ TILING_STRATEGIES = [
         "min_slice": 512,
         "max_slice": 1024,
         "weight": 1.1,
+    },
+    {
+        "name": "resized_small_tiles",
+        "resize_target": (2048, 1446),
+        "slice_height": 512,
+        "slice_width": 512,
+        "overlap_height_ratio": 0.2,
+        "overlap_width_ratio": 0.2,
+        "weight": 1.3,  # Higher weight as resizing often improves detection
+    },
+    {
+        "name": "resized_medium_tiles",
+        "resize_target": (2048, 1446),
+        "slice_height": 768,
+        "slice_width": 768,
+        "overlap_height_ratio": 0.25,
+        "overlap_width_ratio": 0.25,
+        "weight": 1.4,
     },
 ]
 
@@ -176,9 +194,42 @@ def weighted_box_fusion(detections_list, iou_threshold=0.5, skip_box_threshold=0
     return {"boxes": final_boxes, "scores": final_scores, "labels": final_labels}
 
 
-def run_single_strategy(image_path, detection_model, strategy, image_shape):
+def run_single_strategy(image_path, detection_model, strategy, original_image_shape):
     """Run inference with a single tiling strategy"""
-    height, width = image_shape[:2]
+    original_height, original_width = original_image_shape[:2]
+
+    # Handle resizing if specified
+    if "resize_target" in strategy:
+        target_width, target_height = strategy["resize_target"]
+
+        # Create temporary resized image
+        original_image = cv2.imread(image_path)
+        resized_image = cv2.resize(original_image, (target_width, target_height))
+
+        # Save temporary resized image
+        temp_dir = os.path.join(os.path.dirname(image_path), "temp_resized")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_image_name = f"temp_resized_{os.path.basename(image_path)}"
+        temp_image_path = os.path.join(temp_dir, temp_image_name)
+        cv2.imwrite(temp_image_path, resized_image)
+
+        # Use resized dimensions for tiling calculations
+        height, width = target_height, target_width
+        inference_image_path = temp_image_path
+
+        # Calculate scale factors for coordinate transformation
+        scale_x = original_width / target_width
+        scale_y = original_height / target_height
+
+        print(
+            f"  └─ {strategy['name']}: resized ({original_width}x{original_height}) → ({target_width}x{target_height})"
+        )
+    else:
+        # Use original image
+        height, width = original_height, original_width
+        inference_image_path = image_path
+        scale_x = 1.0
+        scale_y = 1.0
 
     if "slice_scale" in strategy:
         # Dynamic strategy
@@ -202,12 +253,12 @@ def run_single_strategy(image_path, detection_model, strategy, image_shape):
         overlap_width_ratio = strategy["overlap_width_ratio"]
 
     print(
-        f"  └─ {strategy['name']}: tile=({slice_width}x{slice_height}), "
+        f"    tile=({slice_width}x{slice_height}), "
         f"overlap=({overlap_width_ratio:.2f}, {overlap_height_ratio:.2f})"
     )
 
     result = get_sliced_prediction(
-        image_path,
+        inference_image_path,
         detection_model,
         slice_height=slice_height,
         slice_width=slice_width,
@@ -224,9 +275,26 @@ def run_single_strategy(image_path, detection_model, strategy, image_shape):
     if hasattr(result, "object_prediction_list"):
         for pred in result.object_prediction_list:
             bbox = pred.bbox
-            boxes.append([bbox.minx, bbox.miny, bbox.maxx, bbox.maxy])
+
+            # Transform coordinates back to original image scale
+            original_minx = bbox.minx * scale_x
+            original_miny = bbox.miny * scale_y
+            original_maxx = bbox.maxx * scale_x
+            original_maxy = bbox.maxy * scale_y
+
+            boxes.append([original_minx, original_miny, original_maxx, original_maxy])
             scores.append(pred.score.value)
             labels.append(pred.category.id)
+
+    # Clean up temporary resized image if created
+    if "resize_target" in strategy:
+        try:
+            os.remove(temp_image_path)
+            # Remove temp directory if empty
+            if not os.listdir(temp_dir):
+                os.rmdir(temp_dir)
+        except:
+            pass  # Ignore cleanup errors
 
     return {
         "boxes": boxes,
@@ -238,18 +306,27 @@ def run_single_strategy(image_path, detection_model, strategy, image_shape):
 
 
 def draw_ensemble_visualization(image, detections, output_path):
-    """Draw ensemble detection results on image using OpenCV"""
+    """Draw ensemble detection results on image using OpenCV with enhanced readability"""
     vis_image = image.copy()
+
+    # High contrast, vivid colors (extend if more classes are needed)
     colors = [
-        (144, 238, 144),  # light green
-        (255, 0, 0),  # red
-        (0, 0, 255),  # blue
-        (255, 255, 0),  # yellow
-        (255, 0, 255),  # magenta
-        (0, 255, 255),  # cyan
-        (128, 0, 128),  # purple
-        (255, 165, 0),  # orange
+        (0, 255, 0),  # Green
+        (255, 0, 0),  # Blue
+        (0, 0, 255),  # Red
+        (0, 255, 255),  # Yellow
+        (255, 0, 255),  # Magenta
+        (255, 255, 0),  # Cyan
+        (255, 128, 0),  # Orange
+        (128, 0, 255),  # Purple
+        (0, 128, 255),  # Sky Blue
+        (255, 0, 128),  # Pinkish
     ]
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8
+    font_thickness = 2
+    box_thickness = 3
 
     for i, (box, score, label) in enumerate(
         zip(detections["boxes"], detections["scores"], detections["labels"])
@@ -258,31 +335,29 @@ def draw_ensemble_visualization(image, detections, output_path):
         color = colors[int(label) % len(colors)]
 
         # Draw bounding box
-        cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, box_thickness)
 
-        # Draw label and confidence
+        # Draw label background and text
         label_text = f"class_{int(label)}: {score:.2f}"
-        label_size = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-        cv2.rectangle(
-            vis_image,
-            (x1, y1 - label_size[1] - 10),
-            (x1 + label_size[0], y1),
-            color,
-            -1,
+        (text_width, text_height), _ = cv2.getTextSize(
+            label_text, font, font_scale, font_thickness
         )
-        # If color is light green, use black text, else white
-        if color == (144, 238, 144):
-            text_color = (0, 0, 0)
-        else:
-            text_color = (255, 255, 255)
+        label_bg_topleft = (x1, y1 - text_height - 12)
+        label_bg_bottomright = (x1 + text_width + 4, y1)
+
+        # Draw background rectangle for contrast
+        cv2.rectangle(vis_image, label_bg_topleft, label_bg_bottomright, color, -1)
+
+        # Draw label text in white
         cv2.putText(
             vis_image,
             label_text,
-            (x1, y1 - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            text_color,
-            1,
+            (x1 + 2, y1 - 5),
+            font,
+            font_scale,
+            (255, 255, 255),
+            font_thickness,
+            cv2.LINE_AA,
         )
 
     # Save ensemble visualization
@@ -307,7 +382,7 @@ def ensemble_inference():
 
     detection_model = UltralyticsDetectionModel(
         model_path=MODEL_PATH,
-        confidence_threshold=0.3,  # Lower threshold for individual strategies
+        confidence_threshold=0.8,  # Lower threshold for individual strategies
         device="cuda",
     )
 

@@ -5,8 +5,8 @@ from datetime import datetime
 import cv2
 
 # Configuration
-IMAGE_DIR = "data/floorplans-roboflow-yolov11/test/images"
-MODEL_PATH = "exports/floorplans_yolov11/weights/best.pt"
+IMAGE_DIR = "test_images"
+MODEL_PATH = "model/model_v52.pt"
 OUTPUT_DIR = "results/sahi_outputs"
 
 # Dynamic tiling params

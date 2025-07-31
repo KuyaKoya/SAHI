@@ -6,8 +6,8 @@ from datetime import datetime
 import cv2
 
 # Configuration
-IMAGE_PATH = "test_images/71_page-0001.jpg"  # your floorplan image
-MODEL_PATH = "exports/floorplans_yolov11/weights/best.pt"
+IMAGE_PATH = "test_images/10-page_1.jpg"  # your floorplan image
+MODEL_PATH = "model/model_v52.pt"
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 RESULT_PATH = f"results/sahi_outputs/sliced_output_{timestamp}.jpg"
 
