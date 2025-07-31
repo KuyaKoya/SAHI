@@ -16,7 +16,9 @@ MAX_SLICE = 1024
 
 
 def infer_with_sahi():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    timestamp_folder = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_subdir = os.path.join(OUTPUT_DIR, timestamp_folder)
+    os.makedirs(output_subdir, exist_ok=True)
 
     detection_model = UltralyticsDetectionModel(
         model_path=MODEL_PATH,
@@ -40,10 +42,8 @@ def infer_with_sahi():
         slice_height = max(MIN_SLICE, min(int(height * SLICE_SCALE), MAX_SLICE))
         slice_width = max(MIN_SLICE, min(int(width * SLICE_SCALE), MAX_SLICE))
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_path = os.path.join(
-            OUTPUT_DIR, f"{os.path.splitext(img_name)[0]}_{timestamp}.jpg"
-        )
+        result_filename = f"{os.path.splitext(img_name)[0]}_sliced_output.jpg"
+        result_path = os.path.join(output_subdir, result_filename)
 
         print(
             f"[INFO] Processing {img_name} | size=({width}x{height}) → tile=({slice_width}x{slice_height})"
@@ -60,8 +60,8 @@ def infer_with_sahi():
         )
 
         result.export_visuals(
-            export_dir=os.path.dirname(result_path),
-            file_name=os.path.basename(result_path),
+            export_dir=output_subdir,
+            file_name=result_filename,
         )
         print(f"[✓] Saved: {result_path}")
 
