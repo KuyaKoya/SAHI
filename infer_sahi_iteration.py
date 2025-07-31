@@ -15,6 +15,10 @@ MIN_SLICE = 512
 MAX_SLICE = 1024
 
 
+def clamp(val, minval, maxval):
+    return max(minval, min(val, maxval))
+
+
 def infer_with_sahi():
     timestamp_folder = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_subdir = os.path.join(OUTPUT_DIR, timestamp_folder)
@@ -39,14 +43,18 @@ def infer_with_sahi():
         height, width = image.shape[:2]
 
         # Dynamically calculate slice sizes
-        slice_height = max(MIN_SLICE, min(int(height * SLICE_SCALE), MAX_SLICE))
-        slice_width = max(MIN_SLICE, min(int(width * SLICE_SCALE), MAX_SLICE))
+        slice_height = clamp(int(height * SLICE_SCALE), MIN_SLICE, MAX_SLICE)
+        slice_width = clamp(int(width * SLICE_SCALE), MIN_SLICE, MAX_SLICE)
+
+        # Dynamically adjust overlap ratios based on slice size
+        overlap_height_ratio = clamp(512 / slice_height, 0.10, 0.30)
+        overlap_width_ratio = clamp(512 / slice_width, 0.10, 0.30)
 
         result_filename = f"{os.path.splitext(img_name)[0]}_sliced_output.jpg"
         result_path = os.path.join(output_subdir, result_filename)
 
         print(
-            f"[INFO] Processing {img_name} | size=({width}x{height}) → tile=({slice_width}x{slice_height})"
+            f"[INFO] Processing {img_name} | size=({width}x{height}) → tile=({slice_width}x{slice_height}), overlap=({overlap_width_ratio:.2f}, {overlap_height_ratio:.2f})"
         )
 
         result = get_sliced_prediction(
@@ -54,8 +62,8 @@ def infer_with_sahi():
             detection_model,
             slice_height=slice_height,
             slice_width=slice_width,
-            overlap_height_ratio=0.25,
-            overlap_width_ratio=0.25,
+            overlap_height_ratio=overlap_height_ratio,
+            overlap_width_ratio=overlap_width_ratio,
             perform_standard_pred=True,
         )
 
