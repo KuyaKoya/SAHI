@@ -1,21 +1,22 @@
+from detectron2.config import get_cfg
+from detectron2.engine import DefaultPredictor
+from detectron2 import model_zoo
 from sahi.models.ultralytics import UltralyticsDetectionModel
 from sahi.predict import get_sliced_prediction
 import os
-from datetime import datetime
 import cv2
 import numpy as np
+from datetime import datetime
 from collections import defaultdict
 import json
 
+
 # Configuration
 IMAGE_DIR = "test_images"
-MODEL_PATHS = [
-    "model/model_v52.pt",
-    "model/detectron_cus_model_2.pt",
-]
+YOLO_MODEL_PATH = "model/model_v52.pt"
+DETECTRON2_MODEL_PATH = "model/detectron_cus_model_2.pth"
 OUTPUT_DIR = "results/sahi_ensemble_outputs"
 
-# Tiling strategies
 TILING_STRATEGIES = [
     {
         "name": "medium_tiles_dynamic",
@@ -108,65 +109,47 @@ def weighted_box_fusion(detections_list, iou_threshold=0.5, skip_box_threshold=0
 
 
 def preprocess_image(image, strategy):
-    """Preprocess image according to strategy settings"""
     processed_image = image.copy()
-
-    # Apply resizing if specified
     if "resize_target" in strategy:
         target_width, target_height = strategy["resize_target"]
         processed_image = cv2.resize(processed_image, (target_width, target_height))
-
-    # Apply CLAHE enhancement if specified
     if strategy.get("apply_grayscale_clahe", False):
         gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
         processed_image = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-
     return processed_image
 
 
 def run_strategy(image, model, strategy):
     original_height, original_width = image.shape[:2]
-
-    # Preprocess image (includes resizing if specified)
     processed_image = preprocess_image(image, strategy)
-    processed_height, processed_width = processed_image.shape[:2]
+    height, width = processed_image.shape[:2]
 
-    # Calculate dynamic slice sizes based on processed image dimensions
     if "slice_scale" in strategy:
         slice_height = clamp(
-            int(processed_height * strategy["slice_scale"]),
+            int(height * strategy["slice_scale"]),
             strategy["min_slice"],
             strategy["max_slice"],
         )
         slice_width = clamp(
-            int(processed_width * strategy["slice_scale"]),
+            int(width * strategy["slice_scale"]),
             strategy["min_slice"],
             strategy["max_slice"],
         )
-        # Calculate dynamic overlap ratios
         overlap_height_ratio = clamp(512 / slice_height, 0.10, 0.30)
         overlap_width_ratio = clamp(512 / slice_width, 0.10, 0.30)
     else:
-        # Fallback to fixed values if not using dynamic slicing
         slice_height = strategy.get("slice_height", 768)
         slice_width = strategy.get("slice_width", 768)
         overlap_height_ratio = strategy.get("overlap_height_ratio", 0.25)
         overlap_width_ratio = strategy.get("overlap_width_ratio", 0.25)
 
-    # Calculate scale factors for coordinate conversion back to original size
     if "resize_target" in strategy:
-        target_width, target_height = strategy["resize_target"]
-        scale_x = original_width / target_width
-        scale_y = original_height / target_height
+        scale_x = original_width / strategy["resize_target"][0]
+        scale_y = original_height / strategy["resize_target"][1]
     else:
-        scale_x = 1.0
-        scale_y = 1.0
-
-    print(
-        f"    [{strategy['name']}] tile=({slice_width}x{slice_height}), overlap=({overlap_width_ratio:.2f}, {overlap_height_ratio:.2f})"
-    )
+        scale_x = scale_y = 1.0
 
     result = get_sliced_prediction(
         processed_image,
@@ -181,12 +164,14 @@ def run_strategy(image, model, strategy):
     boxes, scores, labels = [], [], []
     for pred in result.object_prediction_list:
         bbox = pred.bbox
-        # Scale coordinates back to original image dimensions
-        original_minx = bbox.minx * scale_x
-        original_miny = bbox.miny * scale_y
-        original_maxx = bbox.maxx * scale_x
-        original_maxy = bbox.maxy * scale_y
-        boxes.append([original_minx, original_miny, original_maxx, original_maxy])
+        boxes.append(
+            [
+                bbox.minx * scale_x,
+                bbox.miny * scale_y,
+                bbox.maxx * scale_x,
+                bbox.maxy * scale_y,
+            ]
+        )
         scores.append(pred.score.value)
         labels.append(pred.category.id)
 
@@ -198,80 +183,88 @@ def run_strategy(image, model, strategy):
     }
 
 
+def run_detectron2_inference(predictor, image):
+    outputs = predictor(image)
+    instances = outputs["instances"].to("cpu")
+    return {
+        "boxes": instances.pred_boxes.tensor.numpy().tolist(),
+        "scores": instances.scores.numpy().tolist(),
+        "labels": instances.pred_classes.numpy().tolist(),
+        "weight": 1.0,
+    }
+
+
 def draw_results(image, detections, path):
     for box, score, label in zip(
         detections["boxes"], detections["scores"], detections["labels"]
     ):
         x1, y1, x2, y2 = map(int, box)
-
-        # Draw thicker, more visible bounding box
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 4)
-
-        # Prepare text with larger font
         text = f"Room {score:.2f}"
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 1.2
-        font_thickness = 3
-
-        # Get text size for background rectangle
-        (text_width, text_height), baseline = cv2.getTextSize(
-            text, font, font_scale, font_thickness
-        )
-
-        # Draw background rectangle for better text visibility
-        text_bg_topleft = (x1, y1 - text_height - 15)
-        text_bg_bottomright = (x1 + text_width + 10, y1 - 5)
-        cv2.rectangle(image, text_bg_topleft, text_bg_bottomright, (0, 255, 0), -1)
-
-        # Draw text in black for better contrast
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
+        cv2.rectangle(image, (x1, y1 - th - 10), (x1 + tw + 10, y1), (0, 255, 0), -1)
         cv2.putText(
-            image,
-            text,
-            (x1 + 5, y1 - 10),
-            font,
-            font_scale,
-            (0, 0, 0),
-            font_thickness,
+            image, text, (x1 + 5, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3
         )
     cv2.imwrite(path, image)
+
+
+def load_detectron2_model(model_path, device="cpu"):
+    cfg = get_cfg()
+    cfg.merge_from_file(
+        model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
+    )
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+    cfg.MODEL.WEIGHTS = model_path
+    cfg.MODEL.DEVICE = device
+    return DefaultPredictor(cfg)
 
 
 def ensemble_inference():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = os.path.join(OUTPUT_DIR, timestamp)
     os.makedirs(save_dir, exist_ok=True)
-    models = [
-        UltralyticsDetectionModel(
-            p,
-            confidence_threshold=0.85,
-            device="cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu",
-        )
-        for p in MODEL_PATHS
-    ]
+
+    device = "cuda" if cv2.cuda.getCudaEnabledDeviceCount() > 0 else "cpu"
+
+    yolo_model = UltralyticsDetectionModel(
+        YOLO_MODEL_PATH,
+        confidence_threshold=0.85,
+        device=device,
+    )
+    detectron2_predictor = load_detectron2_model(DETECTRON2_MODEL_PATH, device)
+
     for img_file in os.listdir(IMAGE_DIR):
-        if not img_file.lower().endswith((".jpg", ".png", ".jpeg")):
+        if not img_file.lower().endswith((".jpg", ".jpeg", ".png")):
             continue
         path = os.path.join(IMAGE_DIR, img_file)
         image = cv2.imread(path)
         if image is None:
             continue
-        print(f"[INFO] Processing {img_file}")
+        print(f"\n[INFO] Processing {img_file}")
         all_results = []
-        for model_idx, model in enumerate(models):
-            model_name = os.path.basename(MODEL_PATHS[model_idx])
-            print(f"  [MODEL] Running {model_name}")
-            for strategy in TILING_STRATEGIES:
-                try:
-                    print(f"    [STRATEGY] {strategy['name']}")
-                    results = run_strategy(image.copy(), model, strategy)
-                    all_results.append(results)
-                    print(f"    [RESULT] Found {len(results['boxes'])} detections")
-                except Exception as e:
-                    print(f"    [ERROR] {model_name} + {strategy['name']} failed: {e}")
+
+        # Run YOLO model on tiling strategies
+        for strategy in TILING_STRATEGIES:
+            try:
+                print(f"  [YOLO] Strategy: {strategy['name']}")
+                results = run_strategy(image.copy(), yolo_model, strategy)
+                all_results.append(results)
+                print(f"    Found {len(results['boxes'])} boxes")
+            except Exception as e:
+                print(f"    [ERROR] YOLO + {strategy['name']}: {e}")
+
+        # Run Detectron2 model on full image
+        print(f"  [Detectron2] Full image inference")
+        d2_result = run_detectron2_inference(detectron2_predictor, image)
+        all_results.append(d2_result)
+        print(f"    Found {len(d2_result['boxes'])} boxes")
+
+        # Fuse results
         fused = weighted_box_fusion(all_results)
-        print(
-            f"  [FUSION] Combined {len(all_results)} results → {len(fused['boxes'])} final detections"
-        )
+        print(f"  [FUSION] → {len(fused['boxes'])} boxes after fusion")
+
+        # Draw results
         out_path = os.path.join(save_dir, img_file)
         draw_results(image, fused, out_path)
         print(f"  [✓] Saved: {out_path}")
