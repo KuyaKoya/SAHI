@@ -1,0 +1,24 @@
+# SAHI Object Detection Project - Requirements
+# 
+# Installation Instructions:
+# 1. Create virtual environment: python -m venv .venv && source .venv/bin/activate
+# 2. Install requirements: pip install -r requirements-1.txt
+# 
+# Note: If Detectron2 installation fails on Apple Silicon (M1/M2), install manually:
+# CC=clang CXX=clang++ ARCHFLAGS="-arch arm64" pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'
+
+# PyTorch CPU build (must be installed before detectron2)
+torch>=1.8.0
+torchvision>=0.9.0
+
+# Core libraries
+ultralytics
+sahi
+opencv-python-headless
+pdf2image
+pillow
+
+# Detectron2 (requires PyTorch to be installed first)
+# Note: For Apple Silicon (M1/M2), install manually with:
+# CC=clang CXX=clang++ ARCHFLAGS="-arch arm64" pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'
+detectron2@git+https://github.com/facebookresearch/detectron2.git
