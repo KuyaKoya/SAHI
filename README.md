@@ -2,6 +2,23 @@
 
 This project provides a comprehensive workflow for object detection using SAHI (Slicing Aided Hyper Inference) with YOLOv11, including training, inference, manual annotation correction, and dataset preparation.
 
+## 🆕 Recent Updates (August 2025)
+
+### ✅ **Detectron2 Integration Fixed**
+- **Resolved parameter loading issues** - No more "Skip loading parameter" warnings
+- **Optimized model configuration** - Automatic NUM_CLASSES detection based on training data
+- **Enhanced confidence thresholds** - Both YOLOv11 and Detectron2 now use 85% confidence
+
+### 🚀 **Improved Box Fusion Algorithm**
+- **Connected components clustering** - Better handling of overlapping room detections
+- **Lower IoU threshold (0.3)** - More aggressive merging of overlapping boxes
+- **Weighted averaging** - Preserves detection quality while reducing redundancy
+
+### 📊 **Performance Improvements**
+- **Cleaner results** - Significantly fewer overlapping bounding boxes
+- **Higher quality detections** - 85% confidence threshold filters low-quality predictions
+- **Better room detection** - Enhanced algorithm identifies complete room boundaries more accurately
+
 ---
 ## Environment Setup
 
@@ -100,9 +117,10 @@ SAHI/
 
 #### Multi-Strategy Ensemble Inference
 - **`inference/infer_multi_sahi.py`** - Advanced ensemble inference using multiple tiling strategies
-- **`inference/infer_multi_model_multi_sahi_with_clahe.py`** - Multi-model ensemble with CLAHE enhancement
+- **`inference/infer_multi_model_multi_sahi_with_clahe.py`** - **🆕 Multi-model ensemble with CLAHE enhancement**
 - Combines results from different tile sizes and preprocessing methods
-- Uses Weighted Box Fusion for improved detection accuracy
+- Uses **improved Weighted Box Fusion** for better detection accuracy
+- **Supports both YOLOv11 and Detectron2 models** with optimized configurations
 
 ### 4. **Results Structure**
 
@@ -176,9 +194,11 @@ python training/retrain.py
 
 ### Multi-Model Ensemble
 The project supports multiple model types:
-- **YOLOv11 models** (Ultralytics)
-- **Detectron2 models** (Facebook Research)
+- **YOLOv11 models** (Ultralytics) - Fast and efficient
+- **Detectron2 models** (Facebook Research) - High accuracy with **✅ fixed parameter loading**
 - Custom trained models in both frameworks
+- **🆕 Optimized confidence thresholds** (85% for both models)
+- **🆕 Enhanced box fusion algorithm** with connected components clustering
 
 ### Enhanced Inference Strategies
 The `inference/infer_multi_sahi.py` and related scripts use multiple strategies:
@@ -189,7 +209,8 @@ The `inference/infer_multi_sahi.py` and related scripts use multiple strategies:
 - Resized image processing
 - CLAHE (Contrast Limited Adaptive Histogram Equalization)
 - Grayscale CLAHE enhancement
-- Multi-model ensemble voting
+- **🆕 Multi-model ensemble voting** with improved overlapping box handling
+- **🆕 Connected components clustering** for better room detection merging
 
 ### Image Preprocessing
 - Automatic resizing to optimal dimensions (2048x1446)
@@ -210,7 +231,7 @@ The `inference/infer_multi_sahi.py` and related scripts use multiple strategies:
 | `inference/infer_sahi_htil_iteration.py` | Enhanced SAHI inference | `test_images/` | Timestamped results |
 | `inference/infer_multi_sahi.py` | Ensemble inference | `test_images/` | Multi-strategy results |
 | `inference/infer_clahe_sahi.py` | CLAHE + SAHI inference | `test_images/` | Enhanced results |
-| `inference/infer_multi_model_multi_sahi_with_clahe.py` | Multi-model ensemble | `test_images/` | Combined model results |
+| `inference/infer_multi_model_multi_sahi_with_clahe.py` | **🆕 Multi-model ensemble** | `test_images/` | **Combined YOLOv11+Detectron2 results** |
 | `htil/annotate_gui.py` | Manual annotation | Latest inference | Corrections JSON |
 | `utils/convert_corrections_to_yolo.py` | Format conversion | Corrections | YOLO dataset |
 | `utils/pytorch_to_yolo.py` | Model conversion | PyTorch model | YOLO format |
@@ -232,16 +253,36 @@ CC=clang CXX=clang++ ARCHFLAGS="-arch arm64" pip install --no-build-isolation 'g
 - Install dependencies in the correct order (see requirements-1.txt)
 - PyTorch must be installed before Detectron2
 
+### 🆕 Detectron2 Model Issues
+
+**Parameter shape mismatch warnings during model loading**:
+- ✅ **Fixed**: Detectron2 model configuration now correctly matches custom model architecture
+- The script automatically configures `NUM_CLASSES` based on your model's training data
+- No more "Skip loading parameter" warnings
+
+**Detectron2 detecting nothing**:
+- ✅ **Fixed**: Confidence threshold optimized to 85% for better detection quality
+- Model parameters now load correctly with proper class configuration
+
+### 🆕 Overlapping Detection Issues
+
+**Too many overlapping bounding boxes**:
+- ✅ **Fixed**: Enhanced fusion algorithm with IoU threshold of 0.3 (down from 0.5)
+- Connected components clustering ensures better merging of overlapping room detections
+- Weighted averaging preserves detection quality while reducing redundancy
+
 ## Tips
 
 1. **For best results**: Use ensemble inference (`inference/infer_multi_sahi.py`) for challenging images
 2. **For speed**: Use single strategy inference (`inference/infer_sahi_htil_iteration.py`)
 3. **For enhanced contrast**: Use CLAHE preprocessing (`inference/infer_clahe_sahi.py`)
-4. **For multiple models**: Use multi-model ensemble (`inference/infer_multi_model_multi_sahi_with_clahe.py`)
+4. **🆕 For multiple models**: Use multi-model ensemble (`inference/infer_multi_model_multi_sahi_with_clahe.py`) - **now with fixed Detectron2 support**
 5. **Manual corrections**: Focus on missed detections and false positives
 6. **Iterative improvement**: Retrain → Infer → Correct → Repeat
 7. **PDF processing**: Place PDFs in `pdfs/` folder and use PDF2Image conversion
 8. **Virtual environment**: Always use a virtual environment to avoid dependency conflicts
+9. **🆕 Overlapping boxes**: The enhanced fusion algorithm automatically handles overlapping room detections
+10. **🆕 Model confidence**: Both YOLOv11 and Detectron2 models now use 85% confidence threshold for better quality
 
 ## Model Support
 
