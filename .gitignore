@@ -2,3 +2,5 @@ exports/
 results/
 data/floorplans-roboflow-yolov11/
 model/
+corrected_dataset/
+corrections/
