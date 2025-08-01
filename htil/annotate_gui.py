@@ -250,8 +250,8 @@ class CorrectionTool:
             if not os.path.exists(data_yaml_path):
                 yaml_content = """# corrected_dataset/data.yaml
 
-train: corrected_dataset/images
-val: corrected_dataset/images  # use same for small corrections
+train: images
+val: images  # use same for small corrections
 
 nc: 1
 names: ['room']
