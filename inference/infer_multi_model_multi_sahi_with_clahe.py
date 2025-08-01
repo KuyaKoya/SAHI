@@ -58,7 +58,11 @@ def calculate_iou(box1, box2):
     return intersection / union if union > 0 else 0.0
 
 
-def weighted_box_fusion(detections_list, iou_threshold=0.5, skip_box_threshold=0.001):
+def weighted_box_fusion(detections_list, iou_threshold=0.3, skip_box_threshold=0.001):
+    """
+    Improved weighted box fusion with lower IoU threshold for better merging of overlapping room detections
+    Uses connected components approach for better clustering of overlapping boxes
+    """
     if not detections_list:
         return {"boxes": [], "scores": [], "labels": []}
     all_boxes, all_scores, all_labels, all_weights = [], [], [], []
@@ -86,16 +90,35 @@ def weighted_box_fusion(detections_list, iou_threshold=0.5, skip_box_threshold=0
     final_boxes, final_scores, final_labels = [], [], []
     for cls, inds in grouped.items():
         boxes, scores, weights = all_boxes[inds], all_scores[inds], all_weights[inds]
-        used = np.zeros(len(boxes), dtype=bool)
-        for i in range(len(boxes)):
-            if used[i]:
+
+        # Build adjacency matrix for connected components clustering
+        n = len(boxes)
+        adjacency = np.zeros((n, n), dtype=bool)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if calculate_iou(boxes[i], boxes[j]) >= iou_threshold:
+                    adjacency[i, j] = adjacency[j, i] = True
+
+        # Find connected components
+        visited = np.zeros(n, dtype=bool)
+        for i in range(n):
+            if visited[i]:
                 continue
-            cluster = [i]
-            used[i] = True
-            for j in range(i + 1, len(boxes)):
-                if not used[j] and calculate_iou(boxes[i], boxes[j]) >= iou_threshold:
-                    cluster.append(j)
-                    used[j] = True
+
+            # BFS to find connected component
+            cluster = []
+            queue = [i]
+            visited[i] = True
+
+            while queue:
+                current = queue.pop(0)
+                cluster.append(current)
+                for j in range(n):
+                    if adjacency[current, j] and not visited[j]:
+                        visited[j] = True
+                        queue.append(j)
+
+            # Merge boxes in cluster
             c_boxes = boxes[cluster]
             c_scores = scores[cluster]
             c_weights = weights[cluster]
@@ -214,7 +237,12 @@ def load_detectron2_model(model_path, device="cpu"):
     cfg.merge_from_file(
         model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
     )
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+    # Configure for your custom model - based on error messages showing (3,1024) and (8,1024) shapes
+    # This suggests 2 foreground classes + 1 background = 3 total classes
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = (
+        2  # 2 foreground classes + background is handled automatically
+    )
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.85  # Set confidence to 85%
     cfg.MODEL.WEIGHTS = model_path
     cfg.MODEL.DEVICE = device
     return DefaultPredictor(cfg)
@@ -260,8 +288,10 @@ def ensemble_inference():
         all_results.append(d2_result)
         print(f"    Found {len(d2_result['boxes'])} boxes")
 
-        # Fuse results
-        fused = weighted_box_fusion(all_results)
+        # Fuse results with more aggressive merging for overlapping room detections
+        fused = weighted_box_fusion(
+            all_results, iou_threshold=0.3, skip_box_threshold=0.001
+        )
         print(f"  [FUSION] → {len(fused['boxes'])} boxes after fusion")
 
         # Draw results
