@@ -12,6 +12,7 @@ This project provides a comprehensive workflow for object detection using SAHI (
 
 ### 🚀 **Enhanced Multi-Model Ensemble**
 - **Three-model ensemble** - YOLOv11 + OBB + Detectron2 for maximum detection coverage
+- **Selective model execution** - **🆕 NEW: Choose which models to run via command line**
 - **Organized output structure** - Individual model predictions saved with clear naming convention
 - **Improved weighted fusion** - Smart containment-aware merging reduces overlapping boxes by 39%
 - **Comprehensive visualization** - Both regular and oriented bounding boxes displayed
@@ -121,6 +122,49 @@ SAHI/
 
 ### 3. **Inference Options**
 
+#### 🆕 **NEW: Selective Model Inference**
+
+The new `inference/infer_selective_models.py` script allows you to choose which models to run via command line arguments:
+
+**Basic Usage:**
+```bash
+# Run only YOLO model
+python inference/infer_selective_models.py --yolo
+
+# Run only OBB model  
+python inference/infer_selective_models.py --obb
+
+# Run only Detectron2 model
+python inference/infer_selective_models.py --detectron
+
+# Run YOLO and OBB models
+python inference/infer_selective_models.py --yolo --obb
+
+# Run all three models
+python inference/infer_selective_models.py --yolo --obb --detectron
+# or use the shorthand:
+python inference/infer_selective_models.py --all
+```
+
+**Advanced Options:**
+```bash
+# Run with custom confidence threshold
+python inference/infer_selective_models.py --yolo --obb --confidence 0.7
+
+# Run with custom input/output directories
+python inference/infer_selective_models.py --all --input-dir my_images --output-dir my_results
+
+# Get help with all available options
+python inference/infer_selective_models.py --help
+```
+
+**Benefits:**
+- **Faster execution** - Run only the models you need
+- **Resource optimization** - Save GPU memory and processing time
+- **Flexible testing** - Compare individual model performance
+- **Customizable thresholds** - Adjust confidence levels per run
+- **Automatic fusion** - Multiple models are automatically fused using weighted box fusion
+
 #### Single Strategy Inference
 - **`inference/infer_sahi.py`** - Basic SAHI inference on single images
 - **`inference/infer_sahi_iteration.py`** - Batch inference with dynamic tiling
@@ -131,6 +175,7 @@ SAHI/
 #### Multi-Strategy Ensemble Inference
 - **`inference/infer_multi_sahi.py`** - Advanced ensemble inference using multiple tiling strategies
 - **`inference/infer_mm_ms_wc_with_obb.py`** - **🆕 NEW: Multi-model ensemble with OBB support**
+- **`inference/infer_selective_models.py`** - **🆕 NEW: Selective model inference with command-line control**
 - **`inference/infer_multi_model_multi_sahi_with_clahe.py`** - Multi-model ensemble with CLAHE enhancement
 - Combines results from **YOLOv11 + OBB + Detectron2 models** for maximum detection coverage
 - Uses **enhanced Weighted Box Fusion** with containment-aware clustering
@@ -278,6 +323,7 @@ The ensemble scripts use multiple complementary strategies:
 | `inference/infer_sahi_htil_iteration.py` | Enhanced SAHI inference | `test_images/` | Timestamped results |
 | `inference/infer_multi_sahi.py` | Ensemble inference | `test_images/` | Multi-strategy results |
 | `inference/infer_mm_ms_wc_with_obb.py` | **🆕 OBB + Multi-model ensemble** | `test_images/` | **YOLOv11+OBB+Detectron2 results** |
+| `inference/infer_selective_models.py` | **🆕 Selective model inference** | `test_images/` | **Configurable model results** |
 | `inference/infer_multi_model_multi_sahi_with_clahe.py` | Multi-model ensemble | `test_images/` | Combined YOLOv11+Detectron2 results |
 | `inference/infer_clahe_sahi.py` | CLAHE + SAHI inference | `test_images/` | Enhanced results |
 | `htil/annotate_gui.py` | Manual annotation | Latest inference | Corrections JSON |
@@ -325,12 +371,14 @@ CC=clang CXX=clang++ ARCHFLAGS="-arch arm64" pip install --no-build-isolation 'g
 2. **For speed**: Use single strategy inference (`inference/infer_sahi_htil_iteration.py`)
 3. **For enhanced contrast**: Use CLAHE preprocessing (`inference/infer_clahe_sahi.py`)
 4. **🆕 For multiple models**: Use multi-model ensemble (`inference/infer_multi_model_multi_sahi_with_clahe.py`) - **now with fixed Detectron2 support**
-5. **Manual corrections**: Focus on missed detections and false positives
-6. **Iterative improvement**: Retrain → Infer → Correct → Repeat
-7. **PDF processing**: Place PDFs in `pdfs/` folder and use PDF2Image conversion
-8. **Virtual environment**: Always use a virtual environment to avoid dependency conflicts
-9. **🆕 Overlapping boxes**: The enhanced fusion algorithm automatically handles overlapping room detections
-10. **🆕 Model confidence**: Both YOLOv11 and Detectron2 models now use 85% confidence threshold for better quality
+5. **🆕 For selective execution**: Use `inference/infer_selective_models.py` to run only specific models and save time/resources
+6. **Manual corrections**: Focus on missed detections and false positives
+7. **Iterative improvement**: Retrain → Infer → Correct → Repeat
+8. **PDF processing**: Place PDFs in `pdfs/` folder and use PDF2Image conversion
+9. **Virtual environment**: Always use a virtual environment to avoid dependency conflicts
+10. **🆕 Overlapping boxes**: The enhanced fusion algorithm automatically handles overlapping room detections
+11. **🆕 Model confidence**: Both YOLOv11 and Detectron2 models now use 85% confidence threshold for better quality
+12. **🆕 Resource optimization**: Use `--yolo` only for fast inference, `--all` for maximum accuracy
 
 ## Model Support
 
